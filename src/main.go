@@ -112,7 +112,7 @@ func startBatchHandler(ctx context.Context, args []string) error {
 		return err
 	}
 
-	// Because the function we need to extract batch from tx receipt is not implemented (some main function is private)
+	// Because the function we need to extract batch from tx receipt is not implemented or non-accessible in nitro (some main function is private)
 	// , we will use a stupid way to get the batch. (Todo, add `getBatchFromSubmissionTx` function to nitro source code)
 	seqInbox, err := arbnode.NewSequencerInbox(parentChainClient, common.HexToAddress("0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6"), int64(7262738))
 
