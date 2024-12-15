@@ -34,7 +34,7 @@ type DasHandlerType struct {
 func main() {
 	args := os.Args
 	if len(args) < 2 {
-		panic("Usage: batchtool [decodebatch|retrieveFromDAS|generatehash|dumpkeyset] ...")
+		panic("Usage: batchtool [decodebatch|retrieveFromDAS] ...")
 	}
 	ctx := context.Background()
 	var err error
@@ -198,11 +198,11 @@ func startBatchHandler(ctx context.Context, args []string) error {
 }
 
 func startDASHandler(args []string) error {
-	config, err := parseDasHandlerType(args)
+	_, err := parseDasHandlerType(args)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Starting DAS handler with config: %+v\n", config)
+	fmt.Printf("retrieveFromDAS is not supported now")
 	return nil
 }
