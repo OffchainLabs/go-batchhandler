@@ -1,0 +1,3 @@
+[submodule "nitro"]
+	path = nitro
+	url = https://github.com/offchainlabs/nitro.git
