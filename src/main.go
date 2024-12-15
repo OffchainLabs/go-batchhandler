@@ -45,7 +45,7 @@ func main() {
 		err = startDASHandler(args[2:])
 
 	default:
-		panic(fmt.Sprintf("Unknown tool '%s' specified, valid tools are 'client', 'keygen', 'generatehash'", args[1]))
+		panic(fmt.Sprintf("Unknown tool '%s' specified, valid tools are 'decodebatch', 'retrieveFromDAS'", args[1]))
 	}
 	if err != nil {
 		panic(err)
