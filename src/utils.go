@@ -14,19 +14,23 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/offchainlabs/nitro/arbcompress"
+	"github.com/offchainlabs/nitro/arbnode"
 	"github.com/offchainlabs/nitro/arbos"
 	"github.com/offchainlabs/nitro/arbos/arbosState"
 	"github.com/offchainlabs/nitro/arbos/arbostypes"
 	"github.com/offchainlabs/nitro/arbos/l1pricing"
 	"github.com/offchainlabs/nitro/arbstate"
 	"github.com/offchainlabs/nitro/arbstate/daprovider"
+	"github.com/offchainlabs/nitro/solgen/go/bridgegen"
 	"github.com/offchainlabs/nitro/zeroheavy"
 )
 
-var ErrEmptyDelayedMsg = errors.New("output won't fit in maxsize")       // want "error message should not be uncapitalized or have no punctuation"
-var ErrUnknownDelayedMsg = errors.New("reading unknown delayed message") // want "error message should not be uncapitalized or have no punctuation"
-var ErrOverwritingDelayedMsg = errors.New("overwriting delayed message") // want "error message should not be uncapitalized or have no punctuation"
-var ErrUnknownBatch = errors.New("reading unknown sequencer batch")      // want "error message should not be uncapitalized or have no punctuation"
+var ErrEmptyDelayedMsg = errors.New("output won't fit in maxsize")
+var ErrUnknownDelayedMsg = errors.New("reading unknown delayed message")
+var ErrOverwritingDelayedMsg = errors.New("overwriting delayed message")
+var ErrUnknownBatch = errors.New("reading unknown sequencer batch")
+var ErrBSubmissionTx = errors.New("Not Correct batch submssion tx")
+var ErrBatchNotFound = errors.New("Batch not found")
 
 const maxZeroheavyDecompressedLen = 101*arbstate.MaxDecompressedLen/100 + 64
 
@@ -239,6 +243,83 @@ func getTxHash(parsedSequencerMsg *sequencerMessage) (txes types.Transactions, e
 		}
 	}
 	return txHashes, nil
+}
+
+// This function is not usable because rawLog is private field in arbnode.SequencerInboxBatch
+func getBatchFromSubmissionTx(tx *types.Receipt, seqFilter *bridgegen.SequencerInboxFilterer) (*arbnode.SequencerInboxBatch, error) {
+	logs := tx.Logs
+
+	sequencerBridgeABI, err := bridgegen.SequencerInboxMetaData.GetAbi()
+	if err != nil {
+		panic(err)
+	}
+	batchDeliveredID := sequencerBridgeABI.Events["SequencerBatchDelivered"].ID
+
+	for _, log := range logs {
+		// We just need SequencerBatchDelivered log here
+		if log.Topics[0] != batchDeliveredID {
+			continue
+		}
+		parsedLog, err := seqFilter.ParseSequencerBatchDelivered(*log)
+		if err != nil {
+			return nil, err
+		}
+		if !parsedLog.BatchSequenceNumber.IsUint64() {
+			return nil, errors.New("sequencer inbox event has non-uint64 sequence number")
+		}
+		if !parsedLog.AfterDelayedMessagesRead.IsUint64() {
+			return nil, errors.New("sequencer inbox event has non-uint64 delayed messages read")
+		}
+
+		seqNum := parsedLog.BatchSequenceNumber.Uint64()
+
+		batch := &arbnode.SequencerInboxBatch{
+			BlockHash:              log.BlockHash,
+			ParentChainBlockNumber: log.BlockNumber,
+			SequenceNumber:         seqNum,
+			BeforeInboxAcc:         parsedLog.BeforeAcc,
+			AfterInboxAcc:          parsedLog.AfterAcc,
+			AfterDelayedAcc:        parsedLog.DelayedAcc,
+			AfterDelayedCount:      parsedLog.AfterDelayedMessagesRead.Uint64(),
+			// rawLog:                 *log,
+			TimeBounds: parsedLog.TimeBounds,
+			// dataLocation:           batchDataLocation(parsedLog.DataLocation),
+			// bridgeAddress:          log.Address,
+		}
+		return batch, nil
+	}
+	return nil, ErrBSubmissionTx
+}
+
+func getBatchSeqNumFromSubmission(tx *types.Receipt, seqFilter *bridgegen.SequencerInboxFilterer) (uint64, error) {
+	logs := tx.Logs
+
+	sequencerBridgeABI, err := bridgegen.SequencerInboxMetaData.GetAbi()
+	if err != nil {
+		panic(err)
+	}
+	batchDeliveredID := sequencerBridgeABI.Events["SequencerBatchDelivered"].ID
+
+	for _, log := range logs {
+		// We just need SequencerBatchDelivered log here
+		if log.Topics[0] != batchDeliveredID {
+			continue
+		}
+		parsedLog, err := seqFilter.ParseSequencerBatchDelivered(*log)
+		if err != nil {
+			return 0, err
+		}
+		if !parsedLog.BatchSequenceNumber.IsUint64() {
+			return 0, errors.New("sequencer inbox event has non-uint64 sequence number")
+		}
+		if !parsedLog.AfterDelayedMessagesRead.IsUint64() {
+			return 0, errors.New("sequencer inbox event has non-uint64 delayed messages read")
+		}
+
+		seqNum := parsedLog.BatchSequenceNumber.Uint64()
+		return seqNum, nil
+	}
+	return 0, ErrBSubmissionTx
 }
 
 // func getAfterDelayedBySeqNum(ctx context.Context, client *ethclient.Client, seqNum int64, address common.Address) (afterBatchDelayedCount uint64, err error) {

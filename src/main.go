@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"os"
 	"strings"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/offchainlabs/nitro/arbnode"
 	"github.com/offchainlabs/nitro/arbstate/daprovider"
 	"github.com/offchainlabs/nitro/cmd/util/confighelpers"
+	"github.com/offchainlabs/nitro/solgen/go/bridgegen"
 	"github.com/offchainlabs/nitro/util/headerreader"
 )
 
@@ -94,42 +94,65 @@ func parseDasHandlerType(args []string) (*BatchHandlerType, error) {
 func startBatchHandler(ctx context.Context, args []string) error {
 	config, err := parseBatchHandlerType(args)
 	if err != nil {
-		println("error 3")
 		return err
 	}
 
 	var parentChainClient *ethclient.Client
 	parentChainClient, err = ethclient.DialContext(context.TODO(), config.ParentChainNodeURL)
 
+	submissionTxReceipt, err := parentChainClient.TransactionReceipt(ctx, common.HexToHash(config.BatchSubmissionTxHash))
+
+	if err != nil {
+		return fmt.Errorf("failed to get transaction receipt: %w", err)
+	}
+
+	seqFilter, err := bridgegen.NewSequencerInboxFilterer(common.HexToAddress("0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6"), parentChainClient)
+
 	if err != nil {
 		return err
 	}
 
+	// Because the function we need to extract batch from tx receipt is not implemented (some main function is private)
+	// , we will use a stupid way to get the batch. (Todo, add `getBatchFromSubmissionTx` function to nitro source code)
 	seqInbox, err := arbnode.NewSequencerInbox(parentChainClient, common.HexToAddress("0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6"), int64(7262738))
 
 	if err != nil {
 		return err
 	}
 
-	batches, err := seqInbox.LookupBatchesInRange(ctx, big.NewInt(21384795), big.NewInt(21384797))
-	// 21384796
-	mybatch := batches[0]
+	// We get all batches in the block of the submission tx
+	batches, err := seqInbox.LookupBatchesInRange(ctx, submissionTxReceipt.BlockNumber, submissionTxReceipt.BlockNumber)
 
-	fmt.Println(*mybatch)
+	if err != nil {
+		return err
+	}
 
-	// seqNum := mybatch.SequenceNumber
+	// We get the target batch number of this submission tx
+	targetBatchNum, err := getBatchSeqNumFromSubmission(submissionTxReceipt, seqFilter)
 
-	// TODO: error handling
-	// getAfterDelayedBySeqNum(ctx, parentChainClient, seqNum, common.HexToAddress("0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6"), seqInbox)
-	// seqInbox.
+	if err != nil {
+		return err
+	}
 
-	// backend := &arbnode.multiplexerBackend{
-	// 	batchSeqNum:           0,
-	// }
+	var batch *arbnode.SequencerInboxBatch
+
+	// Compare all batches in the block with the target batch number and get the batch we need
+	for _, subBatch := range batches {
+		if subBatch.SequenceNumber == targetBatchNum {
+			batch = subBatch
+		}
+	}
+
+	if batch == nil {
+		return ErrBatchNotFound
+	}
+
+	// We should use this way directly instead, however this needs to modify some codes in nitro source code
+	// batch, err := getBatchFromSubmissionTx(submissionTxReceipt, seqFilter)
 
 	backend := &MultiplexerBackend{
-		batchSeqNum:    batches[0].SequenceNumber,
-		batch:          batches[0],
+		batchSeqNum:    batch.SequenceNumber,
+		batch:          batch,
 		delayedMessage: nil,
 		ctx:            ctx,
 		client:         parentChainClient,
@@ -144,22 +167,22 @@ func startBatchHandler(ctx context.Context, args []string) error {
 
 	var dapReaders []daprovider.Reader
 
+	// We now only support blob submssion tx
 	dapReaders = append(dapReaders, daprovider.NewReaderForBlobReader(blobClient))
 
 	bytes, batchBlockHash, err := backend.PeekSequencerInbox()
 
 	if err != nil {
+
 		return err
 	}
 
+	// Get sequencer message from this batch
 	parsedSequencerMsg, err := ParseSequencerMessage(ctx, backend.batchSeqNum, batchBlockHash, bytes, dapReaders, daprovider.KeysetPanicIfInvalid)
 
 	if err != nil {
 		return err
 	}
-
-	fmt.Println(parsedSequencerMsg)
-	// multiplexer := arbstate.NewInboxMultiplexer(backend, 0, nil, daprovider.KeysetValidate)
 
 	txes, err := getTxHash(parsedSequencerMsg)
 	if err != nil {
@@ -170,19 +193,7 @@ func startBatchHandler(ctx context.Context, args []string) error {
 		fmt.Println(txes[i].Hash().Hex())
 	}
 	fmt.Println("Find tx numbder: ", len(txes))
-	// // multiplexer.
-	// msgdata, err := multiplexer.Pop(context.TODO())
 
-	// if err != nil {
-	// 	if err == ErrEmptyDelayedMsg {
-	// 		fmt.Println("empty inbox")
-	// 	} else {
-	// 		fmt.Println("error", err)
-	// 	}
-	// 	return err
-	// }
-
-	// fmt.Printf("Starting batch handler with config: %+v\n", config)
 	return nil
 }
 
