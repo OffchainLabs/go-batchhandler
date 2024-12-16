@@ -164,11 +164,7 @@ func startBatchHandler(ctx context.Context, args []string) error {
 
 	lastBatchDelayedCount, err := getAfterDelayedBySeqNum(int64(batch.SequenceNumber)-1, seqFilter)
 
-	// delayedBridge, err := arbnode.NewDelayedBridge(parentChainClient, common.HexToAddress("0x8315177aB297bA92A06054cE80a67Ed4DBd7ed3a"), 0)
-
-	// delayedBridge.LookupMessagesInRange(ctx, lastBatchBlockNum, lastBatchBlockNum, nil)
-
-	err = lookupDelayedByIndexRange(ctx, parentChainClient, common.HexToAddress("0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6"), common.HexToAddress("0x8315177aB297bA92A06054cE80a67Ed4DBd7ed3a"), int64(lastBatchDelayedCount), int64(batch.AfterDelayedCount)-1, backend)
+	err = setDelayedToBackendByIndexRange(ctx, parentChainClient, common.HexToAddress("0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6"), common.HexToAddress("0x8315177aB297bA92A06054cE80a67Ed4DBd7ed3a"), int64(lastBatchDelayedCount), int64(batch.AfterDelayedCount)-1, backend)
 	if err != nil {
 		return fmt.Errorf("failed to get delayed msg: %w", err)
 	}
@@ -188,7 +184,6 @@ func startBatchHandler(ctx context.Context, args []string) error {
 	bytes, batchBlockHash, err := backend.PeekSequencerInbox()
 
 	if err != nil {
-
 		return err
 	}
 

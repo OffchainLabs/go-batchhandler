@@ -365,7 +365,7 @@ func getAfterDelayedBySeqNum(seqNum int64, seqFilter *bridgegen.SequencerInboxFi
 	return afterBatchDelayedCount, nil
 }
 
-func lookupDelayedByIndexRange(ctx context.Context, client *ethclient.Client, inboxAddress common.Address, bridgeAddress common.Address, fromIndex int64, toIndex int64, backend *MultiplexerBackend) error {
+func setDelayedToBackendByIndexRange(ctx context.Context, client *ethclient.Client, inboxAddress common.Address, bridgeAddress common.Address, fromIndex int64, toIndex int64, backend *MultiplexerBackend) error {
 	// If no delayed messages, the fromIndex - 1 = toIndex
 	if fromIndex-1 == toIndex {
 		fmt.Println("No new delayed msg in current batch")
