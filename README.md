@@ -13,7 +13,7 @@ Clone submodules:
 git submodule update --init --recursive --force
 ```
 
-Enter nitro;
+Enter nitro:
 ```bash
 cd nitro
 ```
