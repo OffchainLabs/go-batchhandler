@@ -212,30 +212,6 @@ func getTxHash(parsedSequencerMsg *sequencerMessage, delayedStart uint64, backen
 			}
 			txHashes = append(txHashes, txHash...)
 		} else if kind == arbstate.BatchSegmentKindDelayedMessages {
-			// if r.delayedMessagesRead >= seqMsg.afterDelayedMessages {
-			// 	if segmentNum < uint64(len(seqMsg.segments)) {
-			// 		log.Warn(
-			// 			"attempt to read past batch delayed message count",
-			// 			"delayedMessagesRead", r.delayedMessagesRead,
-			// 			"batchAfterDelayedMessages", seqMsg.afterDelayedMessages,
-			// 		)
-			// 	}
-			// 	msg = &arbostypes.MessageWithMetadata{
-			// 		Message:             arbostypes.InvalidL1Message,
-			// 		DelayedMessagesRead: seqMsg.afterDelayedMessages,
-			// 	}
-			// } else {
-			// 	delayed, realErr := r.backend.ReadDelayedInbox(r.delayedMessagesRead)
-			// 	if realErr != nil {
-			// 		return nil, realErr
-			// 	}
-			// 	r.delayedMessagesRead += 1
-			// 	msg = &arbostypes.MessageWithMetadata{
-			// 		Message:             delayed,
-			// 		DelayedMessagesRead: r.delayedMessagesRead,
-			// 	}
-			// }
-			fmt.Println(delayedPos)
 			delayed, realErr := backend.ReadDelayedInbox(delayedPos)
 			if realErr != nil {
 				return nil, realErr
@@ -248,7 +224,7 @@ func getTxHash(parsedSequencerMsg *sequencerMessage, delayedStart uint64, backen
 			txHash, err := arbos.ParseL2Transactions(delayed, big.NewInt(42161))
 			if err != nil {
 				delayedPos += 1
-				// Todo
+				// Todo: if tx is BatchPostingReportMessage, use current way will be failed
 				continue
 			}
 			txHashes = append(txHashes, txHash...)
