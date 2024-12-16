@@ -98,7 +98,7 @@ func startBatchHandler(ctx context.Context, args []string) error {
 	}
 
 	var parentChainClient *ethclient.Client
-	parentChainClient, err = ethclient.DialContext(context.TODO(), config.ParentChainNodeURL)
+	parentChainClient, err = ethclient.DialContext(ctx, config.ParentChainNodeURL)
 
 	submissionTxReceipt, err := parentChainClient.TransactionReceipt(ctx, common.HexToHash(config.BatchSubmissionTxHash))
 
