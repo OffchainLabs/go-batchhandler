@@ -112,8 +112,12 @@ func startBatchHandler(ctx context.Context, args []string) error {
 		return err
 	}
 
+	// We should use this way directly instead, however this needs to modify some codes in nitro source code
+	// batch, err := getBatchFromSubmissionTx(submissionTxReceipt, seqFilter)
+	// Instead we will use the following stupid way to get the batch instead
+
 	// Because the function we need to extract batch from tx receipt is not implemented or non-accessible in nitro (some main function is private)
-	// , we will use a stupid way to get the batch. (Todo, add `getBatchFromSubmissionTx` function to nitro source code)
+	// , we will use a stupid way to get the batch in this tool now. (Todo, add `getBatchFromSubmissionTx` function to nitro source code)
 	seqInbox, err := arbnode.NewSequencerInbox(parentChainClient, common.HexToAddress("0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6"), int64(7262738))
 
 	if err != nil {
@@ -147,15 +151,26 @@ func startBatchHandler(ctx context.Context, args []string) error {
 		return ErrBatchNotFound
 	}
 
-	// We should use this way directly instead, however this needs to modify some codes in nitro source code
-	// batch, err := getBatchFromSubmissionTx(submissionTxReceipt, seqFilter)
-
 	backend := &MultiplexerBackend{
 		batchSeqNum:    batch.SequenceNumber,
 		batch:          batch,
 		delayedMessage: nil,
 		ctx:            ctx,
 		client:         parentChainClient,
+	}
+
+	// Now we need to get last batch's afterBatchDelayedCount, then we can get how many delayed msg in current batch by
+	// delayed msg in current batch = current batch's afterBatchDelayedCount - last batch's afterBatchDelayedCount
+
+	lastBatchDelayedCount, err := getAfterDelayedBySeqNum(int64(batch.SequenceNumber)-1, seqFilter)
+
+	// delayedBridge, err := arbnode.NewDelayedBridge(parentChainClient, common.HexToAddress("0x8315177aB297bA92A06054cE80a67Ed4DBd7ed3a"), 0)
+
+	// delayedBridge.LookupMessagesInRange(ctx, lastBatchBlockNum, lastBatchBlockNum, nil)
+
+	err = lookupDelayedByIndexRange(ctx, parentChainClient, common.HexToAddress("0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6"), common.HexToAddress("0x8315177aB297bA92A06054cE80a67Ed4DBd7ed3a"), int64(lastBatchDelayedCount), int64(batch.AfterDelayedCount)-1, backend)
+	if err != nil {
+		return fmt.Errorf("failed to get delayed msg: %w", err)
 	}
 
 	blobClient, err := headerreader.NewBlobClient(config.BlobClient, parentChainClient)
@@ -184,7 +199,7 @@ func startBatchHandler(ctx context.Context, args []string) error {
 		return err
 	}
 
-	txes, err := getTxHash(parsedSequencerMsg)
+	txes, err := getTxHash(parsedSequencerMsg, lastBatchDelayedCount, backend)
 	if err != nil {
 		fmt.Println("failed to get tx hash")
 		return err
@@ -192,7 +207,7 @@ func startBatchHandler(ctx context.Context, args []string) error {
 	for i := 0; i < len(txes); i++ {
 		fmt.Println(txes[i].Hash().Hex())
 	}
-	fmt.Println("Find tx numbder: ", len(txes))
+	fmt.Println("Found tx numbder: ", len(txes))
 
 	return nil
 }

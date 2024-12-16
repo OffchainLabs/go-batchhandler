@@ -54,6 +54,9 @@ func (b *MultiplexerBackend) ReadDelayedInbox(seqNum uint64) (*arbostypes.L1Inco
 }
 
 func (b *MultiplexerBackend) SetDelayedMsg(seqNum uint64, msg *arbostypes.L1IncomingMessage) (bool, error) {
+	if b.delayedMessage == nil {
+		b.delayedMessage = make(map[uint64]*arbostypes.L1IncomingMessage)
+	}
 	if b.delayedMessage[seqNum] != nil {
 		return false, ErrOverwritingDelayedMsg
 	}

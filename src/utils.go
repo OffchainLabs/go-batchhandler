@@ -9,8 +9,11 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/offchainlabs/nitro/arbcompress"
@@ -42,6 +45,8 @@ type sequencerMessage struct {
 	afterDelayedMessages uint64
 	segments             [][]byte
 }
+
+// var sequencerBridgeABI
 
 // Reuse code in nitro/arbstate/inbox.go
 func ParseSequencerMessage(ctx context.Context, batchNum uint64, batchBlockHash common.Hash, data []byte, dapReaders []daprovider.Reader, keysetValidationMode daprovider.KeysetValidationMode) (*sequencerMessage, error) {
@@ -169,10 +174,9 @@ func searchAndSetDelayedMsg(parsedSequencerMsg *sequencerMessage) (number int, e
 	return delayedMsgCount, nil
 }
 
-func getTxHash(parsedSequencerMsg *sequencerMessage) (txes types.Transactions, err error) {
-	delayedCount := 0
+func getTxHash(parsedSequencerMsg *sequencerMessage, delayedStart uint64, backend *MultiplexerBackend) (txes types.Transactions, err error) {
 	txHashes := make(types.Transactions, 0)
-
+	delayedPos := delayedStart
 	segments := parsedSequencerMsg.segments
 	for i := 0; i < len(segments); i++ {
 		segment := segments[i]
@@ -203,10 +207,10 @@ func getTxHash(parsedSequencerMsg *sequencerMessage) (txes types.Transactions, e
 			}
 
 			txHash, err := arbos.ParseL2Transactions(msg, big.NewInt(42161))
-			txHashes = append(txHashes, txHash...)
 			if err != nil {
 				return nil, err
 			}
+			txHashes = append(txHashes, txHash...)
 		} else if kind == arbstate.BatchSegmentKindDelayedMessages {
 			// if r.delayedMessagesRead >= seqMsg.afterDelayedMessages {
 			// 	if segmentNum < uint64(len(seqMsg.segments)) {
@@ -231,9 +235,25 @@ func getTxHash(parsedSequencerMsg *sequencerMessage) (txes types.Transactions, e
 			// 		DelayedMessagesRead: r.delayedMessagesRead,
 			// 	}
 			// }
-			delayedCount += 1
-			// Todo
-			println("Skip delayed msg...", delayedCount)
+			fmt.Println(delayedPos)
+			delayed, realErr := backend.ReadDelayedInbox(delayedPos)
+			if realErr != nil {
+				return nil, realErr
+			}
+			if delayed == nil {
+				delayedPos += 1
+				// Todo
+				continue
+			}
+			txHash, err := arbos.ParseL2Transactions(delayed, big.NewInt(42161))
+			if err != nil {
+				delayedPos += 1
+				// Todo
+				continue
+			}
+			txHashes = append(txHashes, txHash...)
+
+			delayedPos += 1
 
 		} else if kind == arbstate.BatchSegmentKindAdvanceTimestamp || kind == arbstate.BatchSegmentKindAdvanceL1BlockNumber {
 			continue
@@ -322,44 +342,78 @@ func getBatchSeqNumFromSubmission(tx *types.Receipt, seqFilter *bridgegen.Sequen
 	return 0, ErrBSubmissionTx
 }
 
-// func getAfterDelayedBySeqNum(ctx context.Context, client *ethclient.Client, seqNum int64, address common.Address) (afterBatchDelayedCount uint64, err error) {
-// 	seqFilter, err := bridgegen.NewISequencerInboxFilterer(address, client)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	iter, err := seqFilter.FilterSequencerBatchDelivered(&bind.FilterOpts{}, []*big.Int{big.NewInt(seqNum)}, nil, nil)
-// 	if err != nil {
-// 		return 0, err
-// 	}
-// 	defer iter.Close()
+func getAfterDelayedBySeqNum(seqNum int64, seqFilter *bridgegen.SequencerInboxFilterer) (afterBatchDelayedCount uint64, err error) {
+	fmt.Println("Searching batch for delayed:", seqNum)
+	iter, err := seqFilter.FilterSequencerBatchDelivered(&bind.FilterOpts{}, []*big.Int{big.NewInt(seqNum)}, nil, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer iter.Close()
 
-// 	sequencerBridgeABI, err := bridgegen.SequencerInboxMetaData.GetAbi()
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	batchDeliveredID := sequencerBridgeABI.Events["SequencerBatchDelivered"].ID
-// 	query := ethereum.FilterQuery{
-// 		Addresses: []common.Address{address},
-// 		Topics:    [][]common.Hash{{batchDeliveredID}},
-// 	}
-// 	logs, err := client.FilterLogs(ctx, query)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	log := logs[0]
-// 	if log.Topics[0] != batchDeliveredID {
-// 		panic(errors.New("unexpected log selector"))
-// 	}
-// 	parsedLog, err := seqInbox.ParseSequencerBatchDelivered(log)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	if !parsedLog.BatchSequenceNumber.IsUint64() {
-// 		panic("sequencer inbox event has non-uint64 sequence number")
-// 	}
-// 	if !parsedLog.AfterDelayedMessagesRead.IsUint64() {
-// 		panic("sequencer inbox event has non-uint64 delayed messages read")
-// 	}
+	for iter.Next() {
+		event := iter.Event
+		if event.BatchSequenceNumber.Cmp(big.NewInt(seqNum)) == 0 {
+			afterBatchDelayedCount = event.AfterDelayedMessagesRead.Uint64()
+		}
 
-// 	return parsedLog.AfterDelayedMessagesRead.Uint64(), nil
-// }
+	}
+
+	if afterBatchDelayedCount == 0 {
+		return 0, ErrBatchNotFound
+	}
+
+	return afterBatchDelayedCount, nil
+}
+
+func lookupDelayedByIndexRange(ctx context.Context, client *ethclient.Client, inboxAddress common.Address, bridgeAddress common.Address, fromIndex int64, toIndex int64, backend *MultiplexerBackend) error {
+	// If no delayed messages, the fromIndex - 1 = toIndex
+	if fromIndex-1 == toIndex {
+		fmt.Println("No new delayed msg in current batch")
+		return nil
+	}
+	parsedIBridgeABI, err := bridgegen.IBridgeMetaData.GetAbi()
+	if err != nil {
+		panic(err)
+	}
+	messageDeliveredID := parsedIBridgeABI.Events["MessageDelivered"].ID
+
+	bridgeAddresses := []common.Address{bridgeAddress}
+
+	query := ethereum.FilterQuery{
+		BlockHash: nil,
+		// FromBlock: new(big.Int).SetUint64(minBlockNum),
+		// ToBlock:   new(big.Int).SetUint64(maxBlockNum),
+		Addresses: bridgeAddresses,
+		Topics:    [][]common.Hash{{messageDeliveredID}, {common.BigToHash(big.NewInt(fromIndex)), common.BigToHash(big.NewInt(toIndex))}},
+	}
+	logs, err := client.FilterLogs(ctx, query)
+
+	var fromBlock uint64
+	var toBlock uint64
+
+	for _, log := range logs {
+		if log.Topics[1] == common.BigToHash(big.NewInt(fromIndex)) {
+			fromBlock = log.BlockNumber
+		}
+		if log.Topics[1] == common.BigToHash(big.NewInt(toIndex)) {
+			toBlock = log.BlockNumber
+		}
+	}
+
+	delayedBridge, err := arbnode.NewDelayedBridge(client, bridgeAddress, fromBlock-1)
+
+	delayedMsg, err := delayedBridge.LookupMessagesInRange(ctx, big.NewInt(int64(fromBlock)), big.NewInt(int64(toBlock)), nil)
+	if err != nil {
+		return err
+	}
+	for _, msg := range delayedMsg {
+		pos, err := msg.Message.Header.SeqNum()
+		if err != nil {
+			return err
+		}
+		backend.SetDelayedMsg(pos, msg.Message)
+	}
+
+	fmt.Println("We got delayed messages: ", len(delayedMsg))
+	return nil
+}
