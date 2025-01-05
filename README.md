@@ -39,11 +39,10 @@ go build -o batchtool src/*
 ```
 
 ### Infomation you need know
-Since this util is stateless, so it can't retrieve every transaction types including: `redeem transaction from retryables` and `batchSpendingReport transaction`.
+Since this util is stateless, so it can't retrieve every transaction types including: `redeem transaction from retryables`
 
 `redeem transaction from retryables` will show up only if the auto-redeem success, if it not, the tx will not be recorded on blockchain. So to check the tx can be executed successfully or not, we need to get the state of the blockchain to verify it.
 
-`batchSpendingReport transaction` is a delayed transaction type which sent from parent chain when a new batch is added. This delayed tx can report how much gas the batch spent. But as this is a delayed tx, so it will be added into sequencer a few batches later, because of this, not only we need the batch info which add this delayed to sequencer inbox but also we need the batch info which sent this delayed tx, so only 1 batch submission receipt is not enough here.
 
 But those tx can be retrieved by some walkaround ways and will be supported in this repo later.
 

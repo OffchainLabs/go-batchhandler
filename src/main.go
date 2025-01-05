@@ -112,6 +112,8 @@ func startBatchHandler(ctx context.Context, args []string) error {
 		return err
 	}
 
+	batchMap := make(map[uint64]*arbnode.SequencerInboxBatch)
+
 	// We should use this way directly instead, however this needs to modify some codes in nitro source code
 	// batch, err := getBatchFromSubmissionTx(submissionTxReceipt, seqFilter)
 	// Instead we will use the following stupid way to get the batch instead
@@ -142,6 +144,8 @@ func startBatchHandler(ctx context.Context, args []string) error {
 
 	// Compare all batches in the block with the target batch number and get the batch we need
 	for _, subBatch := range batches {
+		// keep all batches we got as it may help when we calculate batchSpendingReport tx hash
+		batchMap[subBatch.SequenceNumber] = subBatch
 		if subBatch.SequenceNumber == targetBatchNum {
 			batch = subBatch
 		}
@@ -152,11 +156,25 @@ func startBatchHandler(ctx context.Context, args []string) error {
 	}
 
 	backend := &MultiplexerBackend{
-		batchSeqNum:    batch.SequenceNumber,
-		batch:          batch,
-		delayedMessage: nil,
-		ctx:            ctx,
-		client:         parentChainClient,
+		batchSeqNum:     targetBatchNum,
+		batches:         batchMap,
+		delayedMessages: nil,
+		ctx:             ctx,
+		client:          parentChainClient,
+	}
+
+	// We define a function to get batch data by seq num
+
+	batchFetcher := func(batchNum uint64) ([]byte, error) {
+		batchData, err := backend.GetBatchDataByNum(batchNum)
+		if err != nil {
+			if err == ErrUnknownBatch {
+				return nil, nil
+			} else {
+				return nil, err
+			}
+		}
+		return batchData, nil
 	}
 
 	// Now we need to get last batch's afterBatchDelayedCount, then we can get how many delayed msg in current batch by
@@ -169,6 +187,14 @@ func startBatchHandler(ctx context.Context, args []string) error {
 		return fmt.Errorf("failed to get delayed msg: %w", err)
 	}
 
+	// Get the batches related to target batch's `PostingReportBatch` tx
+	err = getPostingReportBatchAndfillin(ctx, parentChainClient, seqInbox, backend, batchFetcher)
+
+	if err != nil {
+		return err
+	}
+
+	// initialize blob client
 	blobClient, err := headerreader.NewBlobClient(config.BlobClient, parentChainClient)
 	blobClient.Initialize(ctx)
 	if err != nil {
@@ -181,6 +207,7 @@ func startBatchHandler(ctx context.Context, args []string) error {
 	// We now only support blob submssion tx
 	dapReaders = append(dapReaders, daprovider.NewReaderForBlobReader(blobClient))
 
+	// Get the bytes of main batch we are querying
 	bytes, batchBlockHash, err := backend.PeekSequencerInbox()
 
 	if err != nil {
