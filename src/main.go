@@ -22,7 +22,6 @@ type BatchHandlerType struct {
 	BatchSubmissionTxHash string                        `koanf:"parent-chain-submission-tx-hash"`
 	ChildChainId          uint64                        `koanf:"child-chain-id"`
 	BlobClient            headerreader.BlobClientConfig `koanf:"blob-client"`
-	GetBatchReporting     bool                          `koanf:"get-batchreporting"`
 }
 
 type DasHandlerType struct {
@@ -58,7 +57,6 @@ func parseBatchHandlerType(args []string) (*BatchHandlerType, error) {
 	f.String("parent-chain-node-url", "", "URL for parent chain node")
 	f.String("parent-chain-submission-tx-hash", "", "The batch submission transaction hash")
 	f.Uint64("child-chain-id", 0, "Child chain id")
-	f.Bool("get-batchreporting", false, "Get batch reporting delayed tx")
 	headerreader.BlobClientAddOptions("blob-client", f)
 
 	k, err := confighelpers.BeginCommonParse(f, args)
@@ -190,12 +188,13 @@ func startBatchHandler(ctx context.Context, args []string) error {
 	}
 
 	// Get the batches related to target batch's `PostingReportBatch` tx
-	err = fillinDelayedAndGetPostingReportBatch(ctx, parentChainClient, seqInbox, backend, batchFetcher)
+	err = getPostingReportBatchAndfillin(ctx, parentChainClient, seqInbox, backend, batchFetcher)
 
 	if err != nil {
 		return err
 	}
 
+	// initialize blob client
 	blobClient, err := headerreader.NewBlobClient(config.BlobClient, parentChainClient)
 	blobClient.Initialize(ctx)
 	if err != nil {
@@ -208,6 +207,7 @@ func startBatchHandler(ctx context.Context, args []string) error {
 	// We now only support blob submssion tx
 	dapReaders = append(dapReaders, daprovider.NewReaderForBlobReader(blobClient))
 
+	// Get the bytes of main batch we are querying
 	bytes, batchBlockHash, err := backend.PeekSequencerInbox()
 
 	if err != nil {

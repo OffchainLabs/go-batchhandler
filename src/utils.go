@@ -277,7 +277,7 @@ func getBatchFromSubmissionTx(tx *types.Receipt, seqFilter *bridgegen.SequencerI
 
 // traverse whole delayed messages recorded in backend and get which block the first BatchPostingReportMessage starts and
 // last end, then use seqInbox.LookupBatchesInRange to get all those batches' info. Finally, fill in those batches to delayed.
-func fillinDelayedAndGetPostingReportBatch(ctx context.Context, client *ethclient.Client, seqInbox *arbnode.SequencerInbox, backend *MultiplexerBackend, batchFetcher arbostypes.FallibleBatchFetcher) error {
+func getPostingReportBatchAndfillin(ctx context.Context, client *ethclient.Client, seqInbox *arbnode.SequencerInbox, backend *MultiplexerBackend, batchFetcher arbostypes.FallibleBatchFetcher) error {
 	delayedMessages := backend.delayedMessages
 	var startBlock uint64 = ^uint64(0) // max uint64 value
 	var endBlock uint64
