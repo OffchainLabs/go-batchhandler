@@ -144,18 +144,16 @@ func startBatchHandler(ctx context.Context, args []string) error {
 
 	var batch *arbnode.SequencerInboxBatch
 
-	foundTargetBatch := false
-
 	// Compare all batches in the block with the target batch number and get the batch we need
 	for _, subBatch := range batches {
 		// keep all batches we got as it may help when we calculate batchSpendingReport tx hash
 		batchMap[subBatch.SequenceNumber] = subBatch
 		if subBatch.SequenceNumber == targetBatchNum {
-			foundTargetBatch = true
+			batch = subBatch
 		}
 	}
 
-	if foundTargetBatch == false {
+	if batch == nil {
 		return ErrBatchNotFound
 	}
 
