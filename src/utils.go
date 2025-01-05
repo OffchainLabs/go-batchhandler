@@ -345,29 +345,6 @@ func getBatchSeqNumFromSubmission(tx *types.Receipt, seqFilter *bridgegen.Sequen
 	return 0, ErrSubmissionTx
 }
 
-func getBatchBySeqNum(seqNum int64, seqFilter *bridgegen.SequencerInboxFilterer) (afterBatchDelayedCount uint64, err error) {
-	fmt.Println("Searching batch of sequencer number:", seqNum)
-	iter, err := seqFilter.FilterSequencerBatchDelivered(&bind.FilterOpts{}, []*big.Int{big.NewInt(seqNum)}, nil, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer iter.Close()
-
-	for iter.Next() {
-		event := iter.Event
-		if event.BatchSequenceNumber.Cmp(big.NewInt(seqNum)) == 0 {
-			afterBatchDelayedCount = event.AfterDelayedMessagesRead.Uint64()
-		}
-
-	}
-
-	if afterBatchDelayedCount == 0 {
-		return 0, ErrBatchNotFound
-	}
-
-	return afterBatchDelayedCount, nil
-}
-
 func getAfterDelayedBySeqNum(seqNum int64, seqFilter *bridgegen.SequencerInboxFilterer) (afterBatchDelayedCount uint64, err error) {
 	iter, err := seqFilter.FilterSequencerBatchDelivered(&bind.FilterOpts{}, []*big.Int{big.NewInt(seqNum)}, nil, nil)
 	if err != nil {
