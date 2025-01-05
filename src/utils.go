@@ -31,8 +31,9 @@ import (
 var ErrEmptyDelayedMsg = errors.New("output won't fit in maxsize")
 var ErrUnknownDelayedMsg = errors.New("reading unknown delayed message")
 var ErrOverwritingDelayedMsg = errors.New("overwriting delayed message")
+var ErrOverwritingSeqMsg = errors.New("overwriting sequencer message")
 var ErrUnknownBatch = errors.New("reading unknown sequencer batch")
-var ErrBSubmissionTx = errors.New("Not Correct batch submssion tx")
+var ErrSubmissionTx = errors.New("Not Correct batch submssion tx")
 var ErrBatchNotFound = errors.New("Batch not found")
 
 const maxZeroheavyDecompressedLen = 101*arbstate.MaxDecompressedLen/100 + 64
@@ -161,19 +162,6 @@ func ParseSequencerMessage(ctx context.Context, batchNum uint64, batchBlockHash 
 	return parsedMsg, nil
 }
 
-func searchAndSetDelayedMsg(parsedSequencerMsg *sequencerMessage) (number int, err error) {
-	delayedMsgCount := 0
-	segments := parsedSequencerMsg.segments
-	// delayedMsg := make([]*arbostypes.L1IncomingMessage, 0)
-	for i := 0; i < len(segments); i++ {
-		kind := segments[i][0]
-		if kind == arbstate.BatchSegmentKindDelayedMessages {
-			delayedMsgCount++
-		}
-	}
-	return delayedMsgCount, nil
-}
-
 func getTxHash(parsedSequencerMsg *sequencerMessage, delayedStart uint64, backend *MultiplexerBackend) (txes types.Transactions, err error) {
 	txHashes := make(types.Transactions, 0)
 	delayedPos := delayedStart
@@ -284,7 +272,46 @@ func getBatchFromSubmissionTx(tx *types.Receipt, seqFilter *bridgegen.SequencerI
 		}
 		return batch, nil
 	}
-	return nil, ErrBSubmissionTx
+	return nil, ErrSubmissionTx
+}
+
+// traverse whole delayed messages recorded in backend and get which block the first BatchPostingReportMessage starts and
+// last end, then use seqInbox.LookupBatchesInRange to get all those batches' info. Finally, fill in those batches to delayed.
+func fillinDelayedAndGetPostingReportBatch(ctx context.Context, client *ethclient.Client, seqInbox *arbnode.SequencerInbox, backend *MultiplexerBackend, batchFetcher arbostypes.FallibleBatchFetcher) error {
+	delayedMessages := backend.delayedMessages
+	var startBlock uint64 = ^uint64(0) // max uint64 value
+	var endBlock uint64
+	for _, delayedMsg := range delayedMessages {
+		if delayedMsg == nil {
+			continue
+		}
+		if delayedMsg.Header.Kind != arbostypes.L1MessageType_BatchPostingReport {
+			continue
+		}
+		if delayedMsg.Header.BlockNumber < startBlock {
+			startBlock = delayedMsg.Header.BlockNumber
+		}
+		if delayedMsg.Header.BlockNumber > endBlock {
+			endBlock = delayedMsg.Header.BlockNumber
+		}
+	}
+	// Don't find any BatchPostingReportMessage
+	if startBlock == ^uint64(0) {
+		return nil
+	}
+	batches, err := seqInbox.LookupBatchesInRange(ctx, big.NewInt(int64(startBlock)), big.NewInt(int64(endBlock)))
+	if err != nil {
+		return err
+	}
+	// Store the batch to backend so it can be queryed by batchFetcher later
+	for _, batch := range batches {
+		backend.SetInboxMessage(batch.SequenceNumber, batch)
+	}
+	// Fill in delayed messages
+	for _, delayedMsg := range delayedMessages {
+		delayedMsg.FillInBatchGasCost(batchFetcher)
+	}
+	return nil
 }
 
 func getBatchSeqNumFromSubmission(tx *types.Receipt, seqFilter *bridgegen.SequencerInboxFilterer) (uint64, error) {
@@ -315,11 +342,33 @@ func getBatchSeqNumFromSubmission(tx *types.Receipt, seqFilter *bridgegen.Sequen
 		seqNum := parsedLog.BatchSequenceNumber.Uint64()
 		return seqNum, nil
 	}
-	return 0, ErrBSubmissionTx
+	return 0, ErrSubmissionTx
+}
+
+func getBatchBySeqNum(seqNum int64, seqFilter *bridgegen.SequencerInboxFilterer) (afterBatchDelayedCount uint64, err error) {
+	fmt.Println("Searching batch of sequencer number:", seqNum)
+	iter, err := seqFilter.FilterSequencerBatchDelivered(&bind.FilterOpts{}, []*big.Int{big.NewInt(seqNum)}, nil, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer iter.Close()
+
+	for iter.Next() {
+		event := iter.Event
+		if event.BatchSequenceNumber.Cmp(big.NewInt(seqNum)) == 0 {
+			afterBatchDelayedCount = event.AfterDelayedMessagesRead.Uint64()
+		}
+
+	}
+
+	if afterBatchDelayedCount == 0 {
+		return 0, ErrBatchNotFound
+	}
+
+	return afterBatchDelayedCount, nil
 }
 
 func getAfterDelayedBySeqNum(seqNum int64, seqFilter *bridgegen.SequencerInboxFilterer) (afterBatchDelayedCount uint64, err error) {
-	fmt.Println("Searching batch for delayed:", seqNum)
 	iter, err := seqFilter.FilterSequencerBatchDelivered(&bind.FilterOpts{}, []*big.Int{big.NewInt(seqNum)}, nil, nil)
 	if err != nil {
 		return 0, err

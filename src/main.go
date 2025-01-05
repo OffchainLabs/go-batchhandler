@@ -22,6 +22,7 @@ type BatchHandlerType struct {
 	BatchSubmissionTxHash string                        `koanf:"parent-chain-submission-tx-hash"`
 	ChildChainId          uint64                        `koanf:"child-chain-id"`
 	BlobClient            headerreader.BlobClientConfig `koanf:"blob-client"`
+	GetBatchReporting     bool                          `koanf:"get-batchreporting"`
 }
 
 type DasHandlerType struct {
@@ -57,6 +58,7 @@ func parseBatchHandlerType(args []string) (*BatchHandlerType, error) {
 	f.String("parent-chain-node-url", "", "URL for parent chain node")
 	f.String("parent-chain-submission-tx-hash", "", "The batch submission transaction hash")
 	f.Uint64("child-chain-id", 0, "Child chain id")
+	f.Bool("get-batchreporting", false, "Get batch reporting delayed tx")
 	headerreader.BlobClientAddOptions("blob-client", f)
 
 	k, err := confighelpers.BeginCommonParse(f, args)
@@ -112,6 +114,8 @@ func startBatchHandler(ctx context.Context, args []string) error {
 		return err
 	}
 
+	batchMap := make(map[uint64]*arbnode.SequencerInboxBatch)
+
 	// We should use this way directly instead, however this needs to modify some codes in nitro source code
 	// batch, err := getBatchFromSubmissionTx(submissionTxReceipt, seqFilter)
 	// Instead we will use the following stupid way to get the batch instead
@@ -140,23 +144,41 @@ func startBatchHandler(ctx context.Context, args []string) error {
 
 	var batch *arbnode.SequencerInboxBatch
 
+	foundTargetBatch := false
+
 	// Compare all batches in the block with the target batch number and get the batch we need
 	for _, subBatch := range batches {
+		// keep all batches we got as it may help when we calculate batchSpendingReport tx hash
+		batchMap[subBatch.SequenceNumber] = subBatch
 		if subBatch.SequenceNumber == targetBatchNum {
-			batch = subBatch
+			foundTargetBatch = true
 		}
 	}
 
-	if batch == nil {
+	if foundTargetBatch == false {
 		return ErrBatchNotFound
 	}
 
 	backend := &MultiplexerBackend{
-		batchSeqNum:    batch.SequenceNumber,
-		batch:          batch,
-		delayedMessage: nil,
-		ctx:            ctx,
-		client:         parentChainClient,
+		batchSeqNum:     targetBatchNum,
+		batches:         batchMap,
+		delayedMessages: nil,
+		ctx:             ctx,
+		client:          parentChainClient,
+	}
+
+	// We define a function to get batch data by seq num
+
+	batchFetcher := func(batchNum uint64) ([]byte, error) {
+		batchData, err := backend.GetBatchDataByNum(batchNum)
+		if err != nil {
+			if err == ErrUnknownBatch {
+				return nil, nil
+			} else {
+				return nil, err
+			}
+		}
+		return batchData, nil
 	}
 
 	// Now we need to get last batch's afterBatchDelayedCount, then we can get how many delayed msg in current batch by
@@ -167,6 +189,13 @@ func startBatchHandler(ctx context.Context, args []string) error {
 	err = setDelayedToBackendByIndexRange(ctx, parentChainClient, common.HexToAddress("0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6"), common.HexToAddress("0x8315177aB297bA92A06054cE80a67Ed4DBd7ed3a"), int64(lastBatchDelayedCount), int64(batch.AfterDelayedCount)-1, backend)
 	if err != nil {
 		return fmt.Errorf("failed to get delayed msg: %w", err)
+	}
+
+	// Get the batches related to target batch's `PostingReportBatch` tx
+	err = fillinDelayedAndGetPostingReportBatch(ctx, parentChainClient, seqInbox, backend, batchFetcher)
+
+	if err != nil {
+		return err
 	}
 
 	blobClient, err := headerreader.NewBlobClient(config.BlobClient, parentChainClient)
