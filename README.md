@@ -46,7 +46,7 @@ This repository may query incorrect transaction hashes. This can occur due to th
 **Impact on different Hash querying:** The inclusion of invalid transactions by a malicious Sequencer will result in a different hash results compared to the honest fullnode, because honest fullnode will simply ignore this transation that and you can't query it from their endpoint.
 
 
-
+### Limitation
 
 Since this util is stateless, so it can't retrieve every transaction types including: `redeem transaction from retryables`
 
