@@ -39,7 +39,7 @@ go build -o batchtool src/*
 ```
 
 ### Infomation you need know
-This repository may occasionally query incorrect transaction hashes. This can occur due to the potential for malicious behavior from the Sequencer.
+This repository may query incorrect transaction hashes. This can occur due to the potential for malicious behavior from the Sequencer.
 
 **Malicious Sequencer Behavior:** If a malicious Sequencer exists on the network, it could include invalid transactions (e.g., transactions with incorrect nonces) within a batch.
 
