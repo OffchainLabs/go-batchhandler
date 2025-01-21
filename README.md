@@ -39,6 +39,15 @@ go build -o batchtool src/*
 ```
 
 ### Infomation you need know
+This repository may occasionally query incorrect transaction hashes. This can occur due to the potential for malicious behavior from the Sequencer.
+
+**Malicious Sequencer Behavior:** If a malicious Sequencer exists on the network, it could include invalid transactions (e.g., transactions with incorrect nonces) within a batch.
+
+**Impact on different Hash querying:** The inclusion of invalid transactions by a malicious Sequencer will result in a different hash results compared to the honest fullnode, because honest fullnode will simply ignore this transation that and you can't query it from their endpoint.
+
+
+
+
 Since this util is stateless, so it can't retrieve every transaction types including: `redeem transaction from retryables`
 
 `redeem transaction from retryables` will show up only if the auto-redeem success, if it not, the tx will not be recorded on blockchain. So to check the tx can be executed successfully or not, we need to get the state of the blockchain to verify it.
