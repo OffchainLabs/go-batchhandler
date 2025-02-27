@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/offchainlabs/nitro/arbnode"
 	"github.com/offchainlabs/nitro/arbstate/daprovider"
+	"github.com/offchainlabs/nitro/cmd/chaininfo"
 	"github.com/offchainlabs/nitro/cmd/util/confighelpers"
 	"github.com/offchainlabs/nitro/solgen/go/bridgegen"
 	"github.com/offchainlabs/nitro/util/headerreader"
@@ -22,6 +23,7 @@ type BatchHandlerType struct {
 	BatchSubmissionTxHash string                        `koanf:"parent-chain-submission-tx-hash"`
 	ChildChainId          uint64                        `koanf:"child-chain-id"`
 	BlobClient            headerreader.BlobClientConfig `koanf:"blob-client"`
+	ChainInfoFile         string                        `koanf:"chain-info-file"`
 }
 
 type DasHandlerType struct {
@@ -29,7 +31,10 @@ type DasHandlerType struct {
 	BatchSubmissionTxHash string                        `koanf:"parent-chain-submission-tx-hash"`
 	ChildChainId          uint64                        `koanf:"child-chain-id"`
 	BlobClient            headerreader.BlobClientConfig `koanf:"blob-client"`
+	ChainInfoFile         string                        `koanf:"chain-info-file"`
 }
+
+const defaultChainInfoFile = "../nitro/cmd/chaininfo/arbitrum_chain_info.json"
 
 func main() {
 	args := os.Args
@@ -37,6 +42,7 @@ func main() {
 		panic("Usage: batchtool [decodebatch|retrieveFromDAS] ...")
 	}
 	ctx := context.Background()
+
 	var err error
 	switch strings.ToLower(args[1]) {
 	case "decodebatch":
@@ -57,6 +63,7 @@ func parseBatchHandlerType(args []string) (*BatchHandlerType, error) {
 	f.String("parent-chain-node-url", "", "URL for parent chain node")
 	f.String("parent-chain-submission-tx-hash", "", "The batch submission transaction hash")
 	f.Uint64("child-chain-id", 0, "Child chain id")
+	f.String("chain-info-file", "", "Chain info file")
 	headerreader.BlobClientAddOptions("blob-client", f)
 
 	k, err := confighelpers.BeginCommonParse(f, args)
@@ -78,6 +85,7 @@ func parseDasHandlerType(args []string) (*BatchHandlerType, error) {
 	f.String("parent-chain-node-url", "", "URL for parent chain node")
 	f.String("parent-chain-submission-tx-hash", "", "The batch submission transaction hash")
 	f.Uint64("child-chain-id", 0, "Child chain id")
+	f.String("chain-info-file", "", "Chain info file")
 
 	k, err := confighelpers.BeginCommonParse(f, args)
 	if err != nil {
@@ -96,7 +104,17 @@ func startBatchHandler(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	// add user's chain info file to the chain info files
+	chainInfoFiles := []string{defaultChainInfoFile}
+	if config.ChainInfoFile != "" {
+		chainInfoFiles = append(chainInfoFiles, defaultChainInfoFile)
+	}
 
+	chainConfig, err := chaininfo.GetRollupAddressesConfig(config.ChildChainId, "", chainInfoFiles, "")
+	if err != nil {
+		return err
+	}
+	fmt.Println("chainConfig", chainConfig.SequencerInbox)
 	var parentChainClient *ethclient.Client
 	parentChainClient, err = ethclient.DialContext(ctx, config.ParentChainNodeURL)
 
@@ -106,7 +124,7 @@ func startBatchHandler(ctx context.Context, args []string) error {
 		return fmt.Errorf("failed to get transaction receipt: %w", err)
 	}
 
-	seqFilter, err := bridgegen.NewSequencerInboxFilterer(common.HexToAddress("0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6"), parentChainClient)
+	seqFilter, err := bridgegen.NewSequencerInboxFilterer(chainConfig.SequencerInbox, parentChainClient)
 
 	if err != nil {
 		return err
@@ -120,7 +138,7 @@ func startBatchHandler(ctx context.Context, args []string) error {
 
 	// Because the function we need to extract batch from tx receipt is not implemented or non-accessible in nitro (some main function is private)
 	// , we will use a stupid way to get the batch in this tool now. (Todo, add `getBatchFromSubmissionTx` function to nitro source code)
-	seqInbox, err := arbnode.NewSequencerInbox(parentChainClient, common.HexToAddress("0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6"), int64(7262738))
+	seqInbox, err := arbnode.NewSequencerInbox(parentChainClient, chainConfig.SequencerInbox, 0)
 
 	if err != nil {
 		return err
@@ -182,7 +200,7 @@ func startBatchHandler(ctx context.Context, args []string) error {
 
 	lastBatchDelayedCount, err := getAfterDelayedBySeqNum(int64(batch.SequenceNumber)-1, seqFilter)
 
-	err = setDelayedToBackendByIndexRange(ctx, parentChainClient, common.HexToAddress("0x1c479675ad559dc151f6ec7ed3fbf8cee79582b6"), common.HexToAddress("0x8315177aB297bA92A06054cE80a67Ed4DBd7ed3a"), int64(lastBatchDelayedCount), int64(batch.AfterDelayedCount)-1, backend)
+	err = setDelayedToBackendByIndexRange(ctx, parentChainClient, chainConfig.SequencerInbox, chainConfig.Bridge, int64(lastBatchDelayedCount), int64(batch.AfterDelayedCount)-1, backend)
 	if err != nil {
 		return fmt.Errorf("failed to get delayed msg: %w", err)
 	}
