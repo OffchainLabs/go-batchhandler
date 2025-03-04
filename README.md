@@ -35,7 +35,7 @@ go build -o batchtool src/*
 ### Simple example
 
 ```bash
-./batchtool decodebatch --child-chain-id 42161 --parent-chain-node-url {Arb1_Enpoint} --parent-chain-submission-tx-hash {Parent_Chain_Submission_Tx-Hash} --blob-client.beacon-url {Blob_Enpoint}
+./batchtool decodebatch --child-chain-id 42161 --parent-chain-node-url {ParentChain_Enpoint} --parent-chain-submission-tx-hash {Parent_Chain_Submission_Tx-Hash} --blob-client.beacon-url {Blob_Enpoint}
 ```
 
 ### Infomation you need know
