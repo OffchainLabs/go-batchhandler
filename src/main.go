@@ -107,14 +107,13 @@ func startBatchHandler(ctx context.Context, args []string) error {
 	// add user's chain info file to the chain info files
 	chainInfoFiles := []string{defaultChainInfoFile}
 	if config.ChainInfoFile != "" {
-		chainInfoFiles = append(chainInfoFiles, defaultChainInfoFile)
+		chainInfoFiles = append(chainInfoFiles, config.ChainInfoFile)
 	}
 
 	chainConfig, err := chaininfo.GetRollupAddressesConfig(config.ChildChainId, "", chainInfoFiles, "")
 	if err != nil {
 		return err
 	}
-	fmt.Println("chainConfig", chainConfig.SequencerInbox)
 	var parentChainClient *ethclient.Client
 	parentChainClient, err = ethclient.DialContext(ctx, config.ParentChainNodeURL)
 
