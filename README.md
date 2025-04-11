@@ -1,5 +1,4 @@
 ## Go-batchHander
-Note: It's still under development (only supports arb1 blob submission tx now), not ready for public use.
 
 ### Import nitro
 Clone this repo:
