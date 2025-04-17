@@ -1,5 +1,9 @@
 ## Go-batchHander
 
+Note: This tool is designed for education and research cases, and it shouldn't be used as a tool to check the finality status of your transation, for more reasons, please check `Warning` [below](#Warning).
+
+If you are looking for a way to check your transaction's finality, please refer to [parent-chain-confirmation-checker](https://github.com/OffchainLabs/arbitrum-tutorials/tree/master/packages/parent-chain-confirmation-checker)
+
 ### Import nitro
 Clone this repo:
 ```bash
@@ -37,7 +41,7 @@ go build -o batchtool src/*
 ./batchtool decodebatch --child-chain-id 42161 --parent-chain-node-url {ParentChain_Enpoint} --parent-chain-submission-tx-hash {Parent_Chain_Submission_Tx-Hash} --blob-client.beacon-url {Blob_Enpoint}
 ```
 
-### Infomation you need know
+### Warning
 This repository may query incorrect transaction hashes. This can occur due to the potential for malicious behavior from the Sequencer.
 
 **Malicious Sequencer Behavior:** If a malicious Sequencer exists on the network, it could include invalid transactions (e.g., transactions with incorrect nonces) within a batch.
