@@ -11,9 +11,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/offchainlabs/nitro/arbnode"
-	"github.com/offchainlabs/nitro/arbstate/daprovider"
 	"github.com/offchainlabs/nitro/cmd/chaininfo"
 	"github.com/offchainlabs/nitro/cmd/util/confighelpers"
+	"github.com/offchainlabs/nitro/daprovider"
 	"github.com/offchainlabs/nitro/solgen/go/bridgegen"
 	"github.com/offchainlabs/nitro/util/headerreader"
 )
@@ -219,10 +219,10 @@ func startBatchHandler(ctx context.Context, args []string) error {
 		return err
 	}
 
-	var dapReaders []daprovider.Reader
+	dapReaders := daprovider.NewReaderRegistry()
 
 	// We now only support blob submssion tx
-	dapReaders = append(dapReaders, daprovider.NewReaderForBlobReader(blobClient))
+	dapReaders.SetupBlobReader(daprovider.NewReaderForBlobReader(blobClient))
 
 	// Get the bytes of main batch we are querying
 	bytes, batchBlockHash, err := backend.PeekSequencerInbox()

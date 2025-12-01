@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/offchainlabs/nitro/arbnode"
 	"github.com/offchainlabs/nitro/arbos/arbostypes"
-	"github.com/offchainlabs/nitro/arbutil"
 )
 
 type MultiplexerBackend struct {
@@ -16,7 +16,7 @@ type MultiplexerBackend struct {
 	positionWithinMessage uint64
 
 	ctx    context.Context
-	client arbutil.L1Interface
+	client *ethclient.Client
 }
 
 func (b *MultiplexerBackend) PeekSequencerInbox() ([]byte, common.Hash, error) {

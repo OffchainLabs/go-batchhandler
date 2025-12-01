@@ -23,7 +23,7 @@ import (
 	"github.com/offchainlabs/nitro/arbos/arbostypes"
 	"github.com/offchainlabs/nitro/arbos/l1pricing"
 	"github.com/offchainlabs/nitro/arbstate"
-	"github.com/offchainlabs/nitro/arbstate/daprovider"
+	"github.com/offchainlabs/nitro/daprovider"
 	"github.com/offchainlabs/nitro/solgen/go/bridgegen"
 	"github.com/offchainlabs/nitro/zeroheavy"
 )
@@ -50,7 +50,7 @@ type sequencerMessage struct {
 // var sequencerBridgeABI
 
 // Reuse code in nitro/arbstate/inbox.go
-func ParseSequencerMessage(ctx context.Context, batchNum uint64, batchBlockHash common.Hash, data []byte, dapReaders []daprovider.Reader, keysetValidationMode daprovider.KeysetValidationMode) (*sequencerMessage, error) {
+func ParseSequencerMessage(ctx context.Context, batchNum uint64, batchBlockHash common.Hash, data []byte, dapReaders *daprovider.ReaderRegistry, keysetValidationMode daprovider.KeysetValidationMode) (*sequencerMessage, error) {
 	if len(data) < 40 {
 		return nil, errors.New("sequencer message missing L1 header")
 	}
@@ -73,41 +73,36 @@ func ParseSequencerMessage(ctx context.Context, batchNum uint64, batchBlockHash 
 	}
 
 	// Stage 1: Extract the payload from any data availability header.
-	// It's important that multiple DAS strategies can't both be invoked in the same batch,
-	// as these headers are validated by the sequencer inbox and not other DASs.
-	// We try to extract payload from the first occuring valid DA reader in the dapReaders list
-	if len(payload) > 0 {
-		foundDA := false
-		var err error
-		for _, dapReader := range dapReaders {
-			if dapReader != nil && dapReader.IsValidHeaderByte(payload[0]) {
-				payload, err = dapReader.RecoverPayloadFromBatch(ctx, batchNum, batchBlockHash, data, nil, keysetValidationMode != daprovider.KeysetDontValidate)
-				if err != nil {
-					// Matches the way keyset validation was done inside DAS readers i.e logging the error
-					//  But other daproviders might just want to return the error
-					if errors.Is(err, daprovider.ErrSeqMsgValidation) && daprovider.IsDASMessageHeaderByte(payload[0]) {
-						logLevel := log.Error
-						if keysetValidationMode == daprovider.KeysetPanicIfInvalid {
-							logLevel = log.Crit
-						}
-						logLevel(err.Error())
-					} else {
-						return nil, err
+	// Use the registry to find the appropriate reader for the header byte
+	if len(payload) > 0 && dapReaders != nil {
+		if dapReader, found := dapReaders.GetByHeaderByte(payload[0]); found {
+			promise := dapReader.RecoverPayload(batchNum, batchBlockHash, data)
+			result, err := promise.Await(ctx)
+			if err != nil {
+				// Matches the way keyset validation was done inside DAS readers i.e logging the error
+				//  But other daproviders might just want to return the error
+				if daprovider.IsDASMessageHeaderByte(payload[0]) {
+					logLevel := log.Error
+					if keysetValidationMode == daprovider.KeysetPanicIfInvalid {
+						logLevel = log.Crit
 					}
+					logLevel(err.Error())
+				} else {
+					return nil, err
 				}
-				if payload == nil {
-					return parsedMsg, nil
-				}
-				foundDA = true
-				break
 			}
-		}
-
-		if !foundDA {
+			payload = result.Payload
+			if payload == nil {
+				return parsedMsg, nil
+			}
+		} else {
+			// No reader found for this header byte - check if it's a known type
 			if daprovider.IsDASMessageHeaderByte(payload[0]) {
 				log.Error("No DAS Reader configured, but sequencer message found with DAS header")
 			} else if daprovider.IsBlobHashesHeaderByte(payload[0]) {
 				return nil, daprovider.ErrNoBlobReader
+			} else if daprovider.IsDACertificateMessageHeaderByte(payload[0]) {
+				log.Error("No DACertificate reader configured for certificate message")
 			}
 		}
 	}
@@ -194,7 +189,7 @@ func getTxHash(parsedSequencerMsg *sequencerMessage, delayedStart uint64, backen
 				L2msg: segment,
 			}
 
-			txHash, err := arbos.ParseL2Transactions(msg, big.NewInt(42161))
+			txHash, err := arbos.ParseL2Transactions(msg, big.NewInt(42161), 0)
 			if err != nil {
 				return nil, err
 			}
@@ -209,7 +204,7 @@ func getTxHash(parsedSequencerMsg *sequencerMessage, delayedStart uint64, backen
 				// Todo
 				continue
 			}
-			txHash, err := arbos.ParseL2Transactions(delayed, big.NewInt(42161))
+			txHash, err := arbos.ParseL2Transactions(delayed, big.NewInt(42161), 0)
 			if err != nil {
 				delayedPos += 1
 				// Todo: if tx is BatchPostingReportMessage, use current way will be failed
@@ -220,6 +215,7 @@ func getTxHash(parsedSequencerMsg *sequencerMessage, delayedStart uint64, backen
 			delayedPos += 1
 
 		} else if kind == arbstate.BatchSegmentKindAdvanceTimestamp || kind == arbstate.BatchSegmentKindAdvanceL1BlockNumber {
+			fmt.Println("advance timestamp or l1 block number", "segment", segment)
 			continue
 		} else {
 			log.Error("bad sequencer message segment kind", "segmentNum", i, "kind", kind)
@@ -309,7 +305,7 @@ func getPostingReportBatchAndfillin(ctx context.Context, client *ethclient.Clien
 	}
 	// Fill in delayed messages
 	for _, delayedMsg := range delayedMessages {
-		delayedMsg.FillInBatchGasCost(batchFetcher)
+		delayedMsg.FillInBatchGasFields(batchFetcher)
 	}
 	return nil
 }
